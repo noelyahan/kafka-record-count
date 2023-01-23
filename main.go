@@ -20,6 +20,8 @@ type rec struct {
 	lastUpdated time.Time
 }
 
+var mu sync.Mutex
+
 type mockHandler struct {
 	topicCount int
 	mm         sync.Map
@@ -28,9 +30,11 @@ type mockHandler struct {
 }
 
 func (mockHandler) OnPartitionRevoked(ctx context.Context, session kafka.GroupSession) error {
+	//fmt.Println("OnPartitionRevoked")
 	return nil
 }
 func (mockHandler) OnPartitionAssigned(ctx context.Context, session kafka.GroupSession) error {
+	//fmt.Println("OnPartitionAssigned")
 	return nil
 }
 func (mockHandler) OnLost() error { return nil }
@@ -41,12 +45,14 @@ func (h *mockHandler) Consume(ctx context.Context, session kafka.GroupSession, p
 				h.mm.Range(func(key, value interface{}) bool {
 					r := value.(rec)
 					sec := time.Until(r.lastUpdated).Seconds()
-					if math.Abs(sec) > 60 {
+					if math.Abs(sec) > 300 {
+						mu.Lock()
 						_, ok := h.printed[key.(string)]
 						if !ok {
 							fmt.Printf("%v\t%v\n", key, r.count)
 						}
 						h.printed[key.(string)] = "0"
+						mu.Unlock()
 					}
 					return true
 				})
@@ -60,7 +66,17 @@ func (h *mockHandler) Consume(ctx context.Context, session kafka.GroupSession, p
 	})
 	for rec := range partition.Records() {
 		h.set(rec.Topic())
+		err := session.MarkOffset(ctx, rec, "tools")
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		err = session.CommitOffset(ctx, rec, "tools")
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
+
 	return nil
 }
 
@@ -68,9 +84,9 @@ func (h *mockHandler) set(topic string) {
 	i, ok := h.mm.Load(topic)
 	if !ok {
 		r := rec{
+			count:       1,
 			lastUpdated: time.Now(),
 		}
-		atomic.AddUint64(&r.count, 1)
 		h.mm.Store(topic, r)
 		return
 	}
@@ -85,13 +101,6 @@ func initConsumer(broker string, topics []string) {
 	cfg.BootstrapServers = []string{broker}
 	cfg.GroupId = "tools." + uuid.New().String()
 	cfg.Offsets.Initial = kafka.OffsetEarliest
-
-	pc, err := librd.NewGroupConsumer(cfg)
-	if err != nil {
-		panic(err)
-	}
-
-	res := make(map[string]int)
 
 	// get all service topics
 	admin := librd.NewAdmin(cfg.BootstrapServers)
@@ -109,19 +118,21 @@ func initConsumer(broker string, topics []string) {
 	fmt.Printf("found %v topics, starting..\n", len(tt))
 
 	h := mockHandler{once: sync.Once{}, topicCount: len(tt), printed: map[string]string{}}
+
+	pc, err := librd.NewGroupConsumer(cfg)
+	if err != nil {
+		panic(err)
+	}
 	err = pc.Subscribe(tt, &h)
 	if err != nil {
 		panic(err)
 	}
 
-	for tp, co := range res {
-		fmt.Printf("%v %v\n", tp, co)
-	}
 }
 
 func main() {
 	broker := flag.String("bootstrap-servers", "localhost:9002", "--bootstrap-servers localhost:9092")
-	ttStr := flag.String("topics", "mos.accounts,mos.clients", "--topics mos.accounts,mos.clients")
+	ttStr := flag.String("topics", "", "--topics mos.accounts,mos.clients")
 	flag.Parse()
 	var topics []string
 	if *ttStr != "" {
