@@ -149,15 +149,6 @@ func initConsumer(broker string, topics []string) {
 
 	fmt.Printf("found %v topics, starting..\n", len(tt))
 
-	go func() {
-		var stopChan = make(chan os.Signal, 2)
-		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-
-		<-stopChan // wait for SIGINT
-		printAll()
-		os.Exit(0)
-	}()
-
 	wg := sync.WaitGroup{}
 
 	cfg := librd.NewConsumerConfig()
@@ -175,9 +166,8 @@ func initConsumer(broker string, topics []string) {
 			wg.Add(1)
 
 			go func(x int, tp *kafka.Topic) {
-				if pConsume(wg, pc, tp, x) {
-					wg.Done()
-				}
+				pConsume(sync.WaitGroup{}, pc, tp, x)
+				wg.Done()
 			}(i, t)
 		}
 
@@ -190,6 +180,7 @@ func initConsumer(broker string, topics []string) {
 func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i int) bool {
 
 	wg.Add(1)
+	defer wg.Done()
 	done := false
 
 	pp, err := pc.ConsumePartition(context.Background(), t.Name, int32(i), kafka.OffsetEarliest)
@@ -235,7 +226,6 @@ func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i i
 	}
 	if done {
 		fmt.Println(fmt.Sprintf("done [%v], partition: [%v]", t.Name, i))
-		wg.Done()
 		return done
 	}
 
@@ -263,6 +253,16 @@ func main() {
 			printAll()
 		}
 	}()
+
+	go func() {
+		var stopChan = make(chan os.Signal, 2)
+		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+
+		<-stopChan // wait for SIGINT
+		printAll()
+		os.Exit(0)
+	}()
+
 	t := time.Now()
 	initConsumer(*broker, topics)
 	fmt.Println(fmt.Sprintf("total time mins: [%v]", time.Until(t).Minutes()))
