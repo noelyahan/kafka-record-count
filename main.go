@@ -192,7 +192,7 @@ func initConsumer(broker string, topics []string) {
 				sOff := ss[len(ss)-1]
 				off, err := strconv.Atoi(sOff)
 				if err != nil {
-					fmt.Println(err)
+					fmt.Println(err, e.String())
 					err := pp.Close()
 					if err != nil {
 						panic(err)
