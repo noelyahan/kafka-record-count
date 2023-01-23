@@ -181,6 +181,7 @@ func initConsumer(broker string, topics []string) {
 			c += 1
 			return true
 		})
+		fmt.Printf("topic diff: [%v]\n", math.Abs(float64(len(tt)-c)))
 		if c == len(tt) {
 			break
 		}
