@@ -7,11 +7,12 @@ import (
 	"github.com/gmbyapa/kstream/kafka"
 	"github.com/gmbyapa/kstream/kafka/adaptors/librd"
 	"kafka-source-connector-etl/internal/pkg/uuid"
-	"math"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -39,31 +40,32 @@ func (mockHandler) OnPartitionAssigned(ctx context.Context, session kafka.GroupS
 }
 func (mockHandler) OnLost() error { return nil }
 func (h *mockHandler) Consume(ctx context.Context, session kafka.GroupSession, partition kafka.PartitionClaim) error {
-	h.once.Do(func() {
-		go func() {
-			for {
-				h.mm.Range(func(key, value interface{}) bool {
-					r := value.(rec)
-					sec := time.Until(r.lastUpdated).Seconds()
-					if math.Abs(sec) > 300 {
-						mu.Lock()
-						_, ok := h.printed[key.(string)]
-						if !ok {
-							fmt.Printf("%v\t%v\n", key, r.count)
-						}
-						h.printed[key.(string)] = "0"
-						mu.Unlock()
-					}
-					return true
-				})
-				if len(h.printed) == h.topicCount {
-					fmt.Println("Done!")
-					os.Exit(0)
-					break
-				}
-			}
-		}()
-	})
+	//h.once.Do(func() {
+	//	go func() {
+	//		for {
+	//			h.mm.Range(func(key, value interface{}) bool {
+	//				r := value.(rec)
+	//				sec := time.Until(r.lastUpdated).Seconds()
+	//				if math.Abs(sec) > 300 {
+	//					mu.Lock()
+	//					_, ok := h.printed[key.(string)]
+	//					if !ok {
+	//						fmt.Printf("%v\t%v\n", key, r.count)
+	//					}
+	//					h.printed[key.(string)] = "0"
+	//					mu.Unlock()
+	//				}
+	//				return true
+	//			})
+	//			if len(h.printed) == h.topicCount {
+	//				fmt.Println("Done!")
+	//				os.Exit(0)
+	//				break
+	//			}
+	//		}
+	//	}()
+	//})
+
 	for rec := range partition.Records() {
 		h.set(rec.Topic())
 		err := session.MarkOffset(ctx, rec, "tools")
@@ -78,6 +80,14 @@ func (h *mockHandler) Consume(ctx context.Context, session kafka.GroupSession, p
 	}
 
 	return nil
+}
+
+func (h mockHandler) printAll() {
+	h.mm.Range(func(key, value interface{}) bool {
+		r := value.(rec)
+		fmt.Printf("%v\t%v\n", key, r.count)
+		return false
+	})
 }
 
 func (h *mockHandler) set(topic string) {
@@ -119,20 +129,24 @@ func initConsumer(broker string, topics []string) {
 
 	h := mockHandler{once: sync.Once{}, topicCount: len(tt), printed: map[string]string{}}
 
-	for i := 0; i < 10; i++ {
-		go func() {
-			pc, err := librd.NewGroupConsumer(cfg)
-			if err != nil {
-				panic(err)
-			}
-			err = pc.Subscribe(tt, &h)
-			if err != nil {
-				panic(err)
-			}
-		}()
-	}
+	go func() {
+		var stopChan = make(chan os.Signal, 2)
+		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
-	select {}
+		<-stopChan // wait for SIGINT
+		fmt.Println("results")
+		h.printAll()
+		os.Exit(0)
+	}()
+
+	pc, err := librd.NewGroupConsumer(cfg)
+	if err != nil {
+		panic(err)
+	}
+	err = pc.Subscribe(tt, &h)
+	if err != nil {
+		panic(err)
+	}
 
 }
 
@@ -150,4 +164,5 @@ func main() {
 		}
 	}
 	initConsumer(*broker, topics)
+
 }
