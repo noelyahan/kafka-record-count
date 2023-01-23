@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/gmbyapa/kstream/kafka"
 	"github.com/gmbyapa/kstream/kafka/adaptors/librd"
-	"kafka-source-connector-etl/internal/pkg/uuid"
 	"os"
 	"os/signal"
 	"strings"
@@ -22,12 +21,11 @@ type rec struct {
 }
 
 var mu sync.Mutex
+var mm sync.Map
 
 type mockHandler struct {
 	topicCount int
 	mm         sync.Map
-	once       sync.Once
-	printed    map[string]string
 }
 
 func (mockHandler) OnPartitionRevoked(ctx context.Context, session kafka.GroupSession) error {
@@ -40,32 +38,6 @@ func (mockHandler) OnPartitionAssigned(ctx context.Context, session kafka.GroupS
 }
 func (mockHandler) OnLost() error { return nil }
 func (h *mockHandler) Consume(ctx context.Context, session kafka.GroupSession, partition kafka.PartitionClaim) error {
-	//h.once.Do(func() {
-	//	go func() {
-	//		for {
-	//			h.mm.Range(func(key, value interface{}) bool {
-	//				r := value.(rec)
-	//				sec := time.Until(r.lastUpdated).Seconds()
-	//				if math.Abs(sec) > 300 {
-	//					mu.Lock()
-	//					_, ok := h.printed[key.(string)]
-	//					if !ok {
-	//						fmt.Printf("%v\t%v\n", key, r.count)
-	//					}
-	//					h.printed[key.(string)] = "0"
-	//					mu.Unlock()
-	//				}
-	//				return true
-	//			})
-	//			if len(h.printed) == h.topicCount {
-	//				fmt.Println("Done!")
-	//				os.Exit(0)
-	//				break
-	//			}
-	//		}
-	//	}()
-	//})
-
 	for rec := range partition.Records() {
 		h.set(rec.Topic())
 		err := session.MarkOffset(ctx, rec, "tools")
@@ -106,14 +78,33 @@ func (h *mockHandler) set(topic string) {
 	h.mm.Store(topic, r)
 }
 
-func initConsumer(broker string, topics []string) {
-	cfg := librd.NewGroupConsumerConfig()
-	cfg.BootstrapServers = []string{broker}
-	cfg.GroupId = "tools." + uuid.New().String()
-	cfg.Offsets.Initial = kafka.OffsetEarliest
+func printAll() {
+	mm.Range(func(key, value interface{}) bool {
+		r := value.(rec)
+		fmt.Printf("%v\t%v\n", key, r.count)
+		return true
+	})
+}
 
+func set(topic string) {
+	i, ok := mm.Load(topic)
+	if !ok {
+		r := rec{
+			count:       1,
+			lastUpdated: time.Now(),
+		}
+		mm.Store(topic, r)
+		return
+	}
+	r := i.(rec)
+	r.lastUpdated = time.Now()
+	atomic.AddUint64(&r.count, 1)
+	mm.Store(topic, r)
+}
+
+func initConsumer(broker string, topics []string) {
 	// get all service topics
-	admin := librd.NewAdmin(cfg.BootstrapServers)
+	admin := librd.NewAdmin([]string{broker})
 
 	tt, err := admin.ListTopics()
 	if err != nil {
@@ -124,10 +115,7 @@ func initConsumer(broker string, topics []string) {
 		tt = topics
 	}
 
-	//tt = tt[0:2]
 	fmt.Printf("found %v topics, starting..\n", len(tt))
-
-	h := mockHandler{once: sync.Once{}, topicCount: len(tt), printed: map[string]string{}}
 
 	go func() {
 		var stopChan = make(chan os.Signal, 2)
@@ -135,19 +123,38 @@ func initConsumer(broker string, topics []string) {
 
 		<-stopChan // wait for SIGINT
 		fmt.Println("results")
-		h.printAll()
+		printAll()
 		os.Exit(0)
 	}()
 
-	pc, err := librd.NewGroupConsumer(cfg)
-	if err != nil {
-		panic(err)
+	wg := sync.WaitGroup{}
+	for _, t := range tt {
+		wg.Add(1)
+		go func(topic string) {
+			cfg := librd.NewConsumerConfig()
+			cfg.BootstrapServers = []string{broker}
+			pc, err := librd.NewPartitionConsumer(cfg)
+			if err != nil {
+				panic(err)
+			}
+			mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
+			if err != nil {
+				panic(err)
+			}
+			for p, m := range mm {
+				fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
+					topic, p, m.BeginOffset(), m.EndOffset()))
+				for range m.Events() {
+					set(topic)
+				}
+			}
+			fmt.Println("DONE>>>>>>>")
+			wg.Done()
+		}(t)
 	}
-	err = pc.Subscribe(tt, &h)
-	if err != nil {
-		panic(err)
-	}
-
+	wg.Wait()
+	fmt.Println("results")
+	printAll()
 }
 
 func main() {
@@ -164,5 +171,4 @@ func main() {
 		}
 	}
 	initConsumer(*broker, topics)
-
 }
