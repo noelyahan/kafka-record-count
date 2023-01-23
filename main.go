@@ -129,7 +129,13 @@ func initRecCount(brokers []string, topics []string) {
 						//fmt.Println("idx:", idx, "diff:", diff)
 
 						if diff == 1 {
-							//cb()
+							if idx == 0 && diff == 1 {
+								if err := pp.Close(); err != nil {
+									panic(err)
+								}
+								wgPartitions.Done()
+								return
+							}
 						}
 
 						if diff == 2 {
