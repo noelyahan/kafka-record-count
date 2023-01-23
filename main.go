@@ -80,13 +80,8 @@ func initConsumer(broker string, topics []string) {
 		panic(err)
 	}
 
-	mmt := make(map[string]int)
 	if topics != nil || len(topics) != 0 {
 		tt = topics
-	}
-
-	for _, t := range tt {
-		mmt[t] = 0
 	}
 
 	fmt.Printf("found %v topics, starting..\n", len(tt))
@@ -110,9 +105,10 @@ func initConsumer(broker string, topics []string) {
 			if err != nil {
 				panic(err)
 			}
+			fmt.Println(fmt.Sprintf("consuming topic: [%v]", currentTopic))
 			wgPartitions := sync.WaitGroup{}
-			for i, tp := range mp {
-				fmt.Println(fmt.Sprintf("consuming topic: [%v] partition: [%v]", currentTopic, i))
+			for _, tp := range mp {
+				//fmt.Println(fmt.Sprintf("consuming topic: [%v] partition: [%v]", currentTopic, i))
 				wgPartitions.Add(1)
 				go func(pp kafka.Partition) {
 					for e := range pp.Events() {
