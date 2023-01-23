@@ -139,16 +139,18 @@ func initConsumer(broker string, topics []string) {
 	}()
 
 	wg := sync.WaitGroup{}
+
+	cfg := librd.NewConsumerConfig()
+	cfg.BootstrapServers = bb
+	pc, err := librd.NewPartitionConsumer(cfg)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	for _, t := range tt {
 		wg.Add(1)
 		go func(topic string) {
-			cfg := librd.NewConsumerConfig()
-			cfg.BootstrapServers = bb
-			pc, err := librd.NewPartitionConsumer(cfg)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
 			mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
 			if err != nil {
 				fmt.Println(err)
