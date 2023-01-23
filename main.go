@@ -160,13 +160,13 @@ func initConsumer(broker string, topics []string) {
 
 	wg := sync.WaitGroup{}
 
-	//cfg := librd.NewConsumerConfig()
-	//cfg.BootstrapServers = bb
-	//pc, err := librd.NewPartitionConsumer(cfg)
-	//if err != nil {
-	//	fmt.Println(err)
-	//	return
-	//}
+	cfg := librd.NewConsumerConfig()
+	cfg.BootstrapServers = bb
+	pc, err := librd.NewPartitionConsumer(cfg)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	for _, t := range tm {
 		fmt.Println(fmt.Sprintf("topic: [%v], partitions: [%v]", t.Name, t.NumPartitions))
@@ -174,18 +174,11 @@ func initConsumer(broker string, topics []string) {
 			//pConsume(wg, pc, t, i)
 			wg.Add(1)
 
-			cfg := librd.NewConsumerConfig()
-			cfg.BootstrapServers = bb
-			pc, err := librd.NewPartitionConsumer(cfg)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			go func(x int, tp *kafka.Topic, newPc kafka.PartitionConsumer) {
-				if pConsume(sync.WaitGroup{}, newPc, tp, x) {
+			go func(x int, tp *kafka.Topic) {
+				if pConsume(sync.WaitGroup{}, pc, tp, x) {
 					wg.Done()
 				}
-			}(i, t, pc)
+			}(i, t)
 		}
 
 	}
@@ -263,6 +256,13 @@ func main() {
 			topics = append(topics, tp)
 		}
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in f", r)
+			printAll()
+		}
+	}()
 	t := time.Now()
 	initConsumer(*broker, topics)
 	fmt.Println(fmt.Sprintf("total time mins: [%v]", time.Until(t).Minutes()))
