@@ -138,8 +138,13 @@ func initConsumer(broker string, topics []string) {
 		panic(err)
 	}
 
+	mmt := make(map[string]int)
 	if topics != nil || len(topics) != 0 {
 		tt = topics
+	}
+
+	for _, t := range tt {
+		mmt[t] = 0
 	}
 
 	fmt.Printf("found %v topics, starting..\n", len(tt))
@@ -306,5 +311,7 @@ func main() {
 			topics = append(topics, tp)
 		}
 	}
+	t := time.Now()
 	initConsumer(*broker, topics)
+	fmt.Println(fmt.Sprintf("total time mins: [%v]", time.Until(t).Minutes()))
 }
