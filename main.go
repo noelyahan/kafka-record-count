@@ -116,7 +116,7 @@ func initConsumer(broker string, topics []string) {
 				wgPartitions.Add(1)
 				go func(pp kafka.Partition) {
 					for e := range pp.Events() {
-						ctx, cb := context.WithTimeout(context.Background(), 4*time.Second)
+						ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
 						s := e.String()
 						if !strings.Contains(s, "@") {
 							continue
@@ -133,7 +133,7 @@ func initConsumer(broker string, topics []string) {
 						//fmt.Println("idx:", idx, "diff:", diff)
 
 						if diff == 1 {
-							cb()
+							//cb()
 						}
 
 						if diff == 2 {
