@@ -18,8 +18,7 @@ import (
 )
 
 type rec struct {
-	count       uint64
-	lastUpdated time.Time
+	count uint64
 }
 
 var mu sync.Mutex
@@ -42,44 +41,34 @@ func printAll() {
 	}
 }
 
-func setCount(topic string) {
+func setCount(topic string, def ...int) {
 	mu.Lock()
 	defer mu.Unlock()
 	i, ok := mm.Load(topic)
 	if !ok {
 		r := rec{
-			count:       1,
-			lastUpdated: time.Now(),
+			count: 0,
 		}
 		mm.Store(topic, r)
-		return
+		if len(def) != 0 {
+			return
+		}
 	}
+	i, _ = mm.Load(topic)
 	r := i.(rec)
-	r.lastUpdated = time.Now()
 	atomic.AddUint64(&r.count, 1)
 	mm.Store(topic, r)
 }
 
-func initConsumer(broker string, topics []string) {
-	// get all service topics
-	bb := make([]string, 0)
-	bb = append(bb, broker)
-	if strings.Contains(broker, ",") {
-		bb = make([]string, 0)
-		s := strings.ReplaceAll(broker, " ", "")
-		ss := strings.Split(s, ",")
-		for _, b := range ss {
-			bb = append(bb, b)
-		}
-	}
-
-	admin := librd.NewAdmin(bb)
+func initRecCount(brokers []string, topics []string) {
+	admin := librd.NewAdmin(brokers)
 
 	tt, err := admin.ListTopics()
 	if err != nil {
 		panic(err)
 	}
 
+	// override with given topics
 	if topics != nil || len(topics) != 0 {
 		tt = topics
 	}
@@ -87,17 +76,15 @@ func initConsumer(broker string, topics []string) {
 	fmt.Printf("found %v topics, starting..\n", len(tt))
 
 	cfg := librd.NewConsumerConfig()
-	cfg.BootstrapServers = bb
+	cfg.BootstrapServers = brokers
 	pc, err := librd.NewPartitionConsumer(cfg)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	//tpc := "mos.banking.transactions.internal"
-	//tpc := "mos.business.definitions"
-	//tpc := "dlq-topic"
 
 	wgTopic := sync.WaitGroup{}
+	//testTopics := []string{"mos.clients", "dlq-topic", "_schemas"}
 	for _, topic := range tt {
 		wgTopic.Add(1)
 		go func(currentTopic string) {
@@ -112,7 +99,22 @@ func initConsumer(broker string, topics []string) {
 				wgPartitions.Add(1)
 				go func(pp kafka.Partition) {
 					for e := range pp.Events() {
-						ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
+						ctx, cb := context.WithTimeout(context.Background(), 4*time.Second)
+						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
+						if diff == 0 {
+							setCount(currentTopic, 0)
+							cb()
+							go func() {
+								select {
+								case <-ctx.Done():
+									if err := pp.Close(); err != nil {
+										panic(err)
+									}
+									wgPartitions.Done()
+									return
+								}
+							}()
+						}
 						s := e.String()
 						if !strings.Contains(s, "@") {
 							continue
@@ -125,7 +127,7 @@ func initConsumer(broker string, topics []string) {
 
 						setCount(currentTopic)
 
-						diff := math.Abs(float64(idx) - float64(pp.EndOffset()))
+						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
 						//fmt.Println("idx:", idx, "diff:", diff)
 
 						if diff == 1 {
@@ -136,8 +138,6 @@ func initConsumer(broker string, topics []string) {
 							go func() {
 								select {
 								case <-ctx.Done():
-									//fmt.Println("XXXXXXX")
-									//fmt.Println("end.")
 									if err := pp.Close(); err != nil {
 										panic(err)
 									}
@@ -160,107 +160,14 @@ func initConsumer(broker string, topics []string) {
 	printAll()
 }
 
-func v1(tt []string, bb []string) {
-	admin := librd.NewAdmin(bb)
-	tm, err := admin.FetchInfo(tt)
-	if err != nil {
-		panic(err)
+func getArr(s string) []string {
+	ss := strings.Split(s, ",")
+	vv := make([]string, 0)
+	for _, t := range ss {
+		v := strings.ReplaceAll(t, " ", "")
+		vv = append(vv, v)
 	}
-
-	wg := sync.WaitGroup{}
-
-	cfg := librd.NewConsumerConfig()
-	cfg.BootstrapServers = bb
-	pc, err := librd.NewPartitionConsumer(cfg)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	for _, t := range tm {
-		fmt.Println(fmt.Sprintf("topic: [%v], partitions: [%v]", t.Name, t.NumPartitions))
-		for i := 0; i < int(t.NumPartitions); i++ {
-			//pConsume(wg, pc, t, i)
-			wg.Add(1)
-
-			go func(x int, tp *kafka.Topic) {
-				pConsume(sync.WaitGroup{}, pc, tp, x)
-				wg.Done()
-			}(i, t)
-		}
-
-	}
-
-	wg.Wait()
-
-	for {
-		c := 0
-		mm.Range(func(key, value interface{}) bool {
-			c += 1
-			return true
-		})
-		fmt.Printf("topic diff: [%v]\n", math.Abs(float64(len(tt)-c)))
-		if c == len(tt) {
-			break
-		}
-	}
-}
-
-func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i int) bool {
-
-	wg.Add(1)
-	defer wg.Done()
-	done := false
-
-	pp, err := pc.ConsumePartition(context.Background(), t.Name, int32(i), kafka.OffsetEarliest)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
-		t.Name, i, pp.BeginOffset(), pp.EndOffset()))
-
-	diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
-	if diff == 0 {
-		err := pp.Close()
-		if err != nil {
-			panic(err)
-		}
-		return true
-	}
-	for e := range pp.Events() {
-		ss := strings.Split(e.String(), "@")
-		//fmt.Println(ss)
-		sOff := ss[len(ss)-1]
-		off, err := strconv.Atoi(sOff)
-		if err != nil {
-			fmt.Println(err, e.String())
-			err := pp.Close()
-			if err != nil {
-				panic(err)
-			}
-			//done = true
-			//break
-			off = 0
-		}
-		//fmt.Println(off)
-		setCount(t.Name)
-		if off+2 == int(pp.EndOffset()) {
-			err := pp.Close()
-			if err != nil {
-				panic(err)
-			}
-			done = true
-			break
-		}
-	}
-	if done {
-		fmt.Println(fmt.Sprintf("done [%v], partition: [%v]", t.Name, i))
-		return done
-	}
-
-	return done
-
+	return vv
 }
 
 func main() {
@@ -269,17 +176,17 @@ func main() {
 	flag.Parse()
 	var topics []string
 	if *ttStr != "" {
-		tt := strings.Split(*ttStr, ",")
-		topics = make([]string, 0)
-		for _, t := range tt {
-			tp := strings.ReplaceAll(t, " ", "")
-			topics = append(topics, tp)
-		}
+		topics = getArr(*ttStr)
+	}
+
+	brokers := make([]string, 0)
+	brokers = append(brokers, *broker)
+	if strings.Contains(*broker, ",") {
+		brokers = getArr(*broker)
 	}
 
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered in f", r)
 			printAll()
 		}
 	}()
@@ -294,6 +201,6 @@ func main() {
 	}()
 
 	t := time.Now()
-	initConsumer(*broker, topics)
-	fmt.Println(fmt.Sprintf("total time mins: [%v]", time.Until(t).Minutes()))
+	initRecCount(brokers, topics)
+	fmt.Println(fmt.Sprintf("total time mins: [%v]", math.Abs(time.Until(t).Minutes())))
 }
