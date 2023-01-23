@@ -44,15 +44,19 @@ func printAll() {
 func setCount(topic string, def ...int) {
 	mu.Lock()
 	defer mu.Unlock()
+	if len(def) != 0 {
+		r := rec{
+			count: 0,
+		}
+		mm.Store(topic, r)
+		return
+	}
 	i, ok := mm.Load(topic)
 	if !ok {
 		r := rec{
 			count: 0,
 		}
 		mm.Store(topic, r)
-		if len(def) != 0 {
-			return
-		}
 	}
 	i, _ = mm.Load(topic)
 	r := i.(rec)
