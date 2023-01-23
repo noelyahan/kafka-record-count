@@ -81,11 +81,20 @@ func (h *mockHandler) set(topic string) {
 }
 
 func printAll() {
+	res := ""
 	mm.Range(func(key, value interface{}) bool {
 		r := value.(rec)
-		fmt.Printf("%v\t%v\n", key, r.count)
+		s := fmt.Sprintf("%v\t%v\n", key, r.count)
+		res += s
+		fmt.Print(s)
 		return true
 	})
+	mode := int(0777)
+
+	err := os.WriteFile("count.txt", []byte(res), os.FileMode(mode))
+	if err != nil {
+		panic(err)
+	}
 }
 
 func set(topic string) {
