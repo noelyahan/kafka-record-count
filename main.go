@@ -24,6 +24,8 @@ type rec struct {
 var mu sync.Mutex
 var mm sync.Map
 
+//var once sync.Once
+
 func printAll() {
 	res := fmt.Sprintf("topic\ttotal-count\n\n")
 	mm.Range(func(key, value interface{}) bool {
@@ -89,6 +91,7 @@ func initRecCount(brokers []string, topics []string) {
 
 	wgTopic := sync.WaitGroup{}
 	//testTopics := []string{"mos.clients", "dlq-topic", "_schemas"}
+	//testTopics := []string{"mos.banking.transactions"}
 	for _, topic := range tt {
 		wgTopic.Add(1)
 		go func(currentTopic string) {
@@ -102,8 +105,9 @@ func initRecCount(brokers []string, topics []string) {
 				//fmt.Println(fmt.Sprintf("consuming topic: [%v] partition: [%v]", currentTopic, i))
 				wgPartitions.Add(1)
 				go func(pp kafka.Partition) {
+					once := sync.Once{}
 					for e := range pp.Events() {
-						ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
+						ctx, _ := context.WithTimeout(context.Background(), 60*time.Second)
 						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
 						if diff == 0 {
 							setCount(currentTopic, 0)
@@ -128,17 +132,7 @@ func initRecCount(brokers []string, topics []string) {
 						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
 						//fmt.Println("idx:", idx, "diff:", diff)
 
-						if diff == 1 {
-							if idx == 0 && diff == 1 {
-								if err := pp.Close(); err != nil {
-									panic(err)
-								}
-								wgPartitions.Done()
-								return
-							}
-						}
-
-						if diff == 2 {
+						once.Do(func() {
 							go func() {
 								select {
 								case <-ctx.Done():
@@ -149,7 +143,7 @@ func initRecCount(brokers []string, topics []string) {
 									return
 								}
 							}()
-						}
+						})
 
 					}
 				}(tp)
