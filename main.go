@@ -135,7 +135,8 @@ func initConsumer(broker string, topics []string) {
 			cfg.BootstrapServers = []string{broker}
 			pc, err := librd.NewPartitionConsumer(cfg)
 			if err != nil {
-				panic(err)
+				fmt.Println(err)
+				return
 			}
 			mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
 			if err != nil {
