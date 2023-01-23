@@ -104,7 +104,18 @@ func set(topic string) {
 
 func initConsumer(broker string, topics []string) {
 	// get all service topics
-	admin := librd.NewAdmin([]string{broker})
+	bb := make([]string, 0)
+	bb = append(bb, broker)
+	if strings.Contains(broker, ",") {
+		bb = make([]string, 0)
+		s := strings.ReplaceAll(broker, " ", "")
+		ss := strings.Split(s, ",")
+		for _, b := range ss {
+			bb = append(bb, b)
+		}
+	}
+
+	admin := librd.NewAdmin(bb)
 
 	tt, err := admin.ListTopics()
 	if err != nil {
@@ -132,7 +143,7 @@ func initConsumer(broker string, topics []string) {
 		wg.Add(1)
 		go func(topic string) {
 			cfg := librd.NewConsumerConfig()
-			cfg.BootstrapServers = []string{broker}
+			cfg.BootstrapServers = bb
 			pc, err := librd.NewPartitionConsumer(cfg)
 			if err != nil {
 				fmt.Println(err)
