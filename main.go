@@ -66,7 +66,7 @@ func setCount(topic string, def ...int) {
 	mm.Store(topic, r)
 }
 
-func initRecCount(brokers []string, topics []string) {
+func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 	admin := librd.NewAdmin(brokers)
 
 	tt, err := admin.ListTopics()
@@ -107,7 +107,7 @@ func initRecCount(brokers []string, topics []string) {
 				go func(pp kafka.Partition) {
 					once := sync.Once{}
 					for e := range pp.Events() {
-						ctx, _ := context.WithTimeout(context.Background(), 60*time.Second)
+						ctx, _ := context.WithTimeout(context.Background(), timeout)
 						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
 						if diff == 0 {
 							setCount(currentTopic, 0)
@@ -171,6 +171,7 @@ func getArr(s string) []string {
 func main() {
 	broker := flag.String("bootstrap-servers", "localhost:9092", "--bootstrap-servers localhost:9092")
 	ttStr := flag.String("topics", "", "--topics mos.accounts,mos.clients")
+	timeoutStr := flag.String("timeout", "120", "--timeout 120s")
 	flag.Parse()
 	var topics []string
 	if *ttStr != "" {
@@ -181,6 +182,16 @@ func main() {
 	brokers = append(brokers, *broker)
 	if strings.Contains(*broker, ",") {
 		brokers = getArr(*broker)
+	}
+
+	timeout := time.Duration(120) * time.Second
+	if *timeoutStr != "" {
+		s := strings.ReplaceAll(*timeoutStr, "s", "")
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			panic(err)
+		}
+		timeout = time.Duration(i) * time.Second
 	}
 
 	defer func() {
@@ -199,6 +210,6 @@ func main() {
 	}()
 
 	t := time.Now()
-	initRecCount(brokers, topics)
+	initRecCount(brokers, topics, timeout)
 	fmt.Println(fmt.Sprintf("total time mins: [%v]", math.Abs(time.Until(t).Minutes())))
 }
