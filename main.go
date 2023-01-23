@@ -81,7 +81,7 @@ func (h *mockHandler) set(topic string) {
 }
 
 func printAll() {
-	res := ""
+	res := fmt.Sprintf("topic\ttotal-count\n\n")
 	mm.Range(func(key, value interface{}) bool {
 		r := value.(rec)
 		s := fmt.Sprintf("%v\t%v\n", key, r.count)
@@ -97,7 +97,7 @@ func printAll() {
 	}
 }
 
-func set(topic string) {
+func setCount(topic string) {
 	i, ok := mm.Load(topic)
 	if !ok {
 		r := rec{
@@ -154,148 +154,100 @@ func initConsumer(broker string, topics []string) {
 		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 		<-stopChan // wait for SIGINT
-		fmt.Println("results")
 		printAll()
 		os.Exit(0)
 	}()
 
 	wg := sync.WaitGroup{}
 
-	cfg := librd.NewConsumerConfig()
-	cfg.BootstrapServers = bb
-	pc, err := librd.NewPartitionConsumer(cfg)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	//cfg := librd.NewConsumerConfig()
+	//cfg.BootstrapServers = bb
+	//pc, err := librd.NewPartitionConsumer(cfg)
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
 
 	for _, t := range tm {
-		fmt.Println(t.Name, t.NumPartitions)
+		fmt.Println(fmt.Sprintf("topic: [%v], partitions: [%v]", t.Name, t.NumPartitions))
 		for i := 0; i < int(t.NumPartitions); i++ {
+			//pConsume(wg, pc, t, i)
 			wg.Add(1)
-			done := false
 
-			pp, err := pc.ConsumePartition(context.Background(), t.Name, int32(i), kafka.OffsetEarliest)
+			cfg := librd.NewConsumerConfig()
+			cfg.BootstrapServers = bb
+			pc, err := librd.NewPartitionConsumer(cfg)
 			if err != nil {
-				panic(err)
+				fmt.Println(err)
+				return
 			}
-
-			fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
-				t.Name, i, pp.BeginOffset(), pp.EndOffset()))
-
-			diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
-			if diff == 0 {
-				err := pp.Close()
-				if err != nil {
-					panic(err)
+			go func(x int, tp *kafka.Topic, newPc kafka.PartitionConsumer) {
+				if pConsume(sync.WaitGroup{}, newPc, tp, x) {
+					wg.Done()
 				}
-				continue
-			}
-			for e := range pp.Events() {
-				ss := strings.Split(e.String(), "@")
-				//fmt.Println(ss)
-				sOff := ss[len(ss)-1]
-				off, err := strconv.Atoi(sOff)
-				if err != nil {
-					fmt.Println(err, e.String())
-					err := pp.Close()
-					if err != nil {
-						panic(err)
-					}
-					done = true
-					break
-				}
-				//fmt.Println(off)
-				set(t.Name)
-				if off+2 == int(pp.EndOffset()) {
-					err := pp.Close()
-					if err != nil {
-						panic(err)
-					}
-					done = true
-					break
-				}
-			}
-			if done {
-				fmt.Println(fmt.Sprintf("done [%v], partition: [%v]", t.Name, i))
-				wg.Done()
-				continue
-			}
+			}(i, t, pc)
 		}
 
 	}
 
-	//for _, t := range tt {
-	//	wg.Add(1)
-	//	go func(topic string) {
-	//		mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
-	//		if err != nil {
-	//			fmt.Println(err)
-	//			return
-	//		}
-	//		for p, m := range mm {
-	//
-	//			done := false
-	//			wg.Add(1)
-	//			diff := math.Abs(float64(m.BeginOffset() - m.EndOffset()))
-	//			// skip to next partition
-	//			if diff == 0 {
-	//				err := m.Close()
-	//				if err != nil {
-	//					panic(err)
-	//				}
-	//				wg.Done()
-	//				continue
-	//			}
-	//
-	//			fmt.Println(fmt.Sprintf("topic: [%v], total_p:[%v], partition: [%v], start: [%v], end: [%v]",
-	//				topic, len(mm), p, m.BeginOffset(), m.EndOffset()))
-	//			go func() {
-	//				// partition wise events
-	//				for e := range m.Events() {
-	//					fmt.Println(e.String())
-	//					ss := strings.Split(e.String(), "@")
-	//					fmt.Println(ss)
-	//					sOff := ss[len(ss)-1]
-	//					off, err := strconv.Atoi(sOff)
-	//					if err != nil {
-	//						fmt.Println(err)
-	//						err := m.Close()
-	//						if err != nil {
-	//							panic(err)
-	//						}
-	//						done = true
-	//						break
-	//					}
-	//					//fmt.Println(e.String())
-	//					set(topic)
-	//
-	//					if off+2 == int(m.EndOffset()) {
-	//						err := m.Close()
-	//						if err != nil {
-	//							panic(err)
-	//						}
-	//						done = true
-	//						break
-	//					}
-	//				}
-	//
-	//				if done {
-	//					fmt.Println(fmt.Sprintf("done [%v]", t))
-	//					wg.Done()
-	//					return
-	//				}
-	//
-	//			}()
-	//		}
-	//		wg.Done()
-	//
-	//	}(t)
-	//}
-
 	wg.Wait()
-	fmt.Println("results")
 	printAll()
+}
+
+func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i int) bool {
+
+	wg.Add(1)
+	done := false
+
+	pp, err := pc.ConsumePartition(context.Background(), t.Name, int32(i), kafka.OffsetEarliest)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
+		t.Name, i, pp.BeginOffset(), pp.EndOffset()))
+
+	diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
+	if diff == 0 {
+		err := pp.Close()
+		if err != nil {
+			panic(err)
+		}
+		return true
+	}
+	for e := range pp.Events() {
+		ss := strings.Split(e.String(), "@")
+		//fmt.Println(ss)
+		sOff := ss[len(ss)-1]
+		off, err := strconv.Atoi(sOff)
+		if err != nil {
+			fmt.Println(err, e.String())
+			err := pp.Close()
+			if err != nil {
+				panic(err)
+			}
+			done = true
+			break
+		}
+		//fmt.Println(off)
+		setCount(t.Name)
+		if off+2 == int(pp.EndOffset()) {
+			err := pp.Close()
+			if err != nil {
+				panic(err)
+			}
+			done = true
+			break
+		}
+	}
+	if done {
+		fmt.Println(fmt.Sprintf("done [%v], partition: [%v]", t.Name, i))
+		wg.Done()
+		return done
+	}
+
+	return done
+
 }
 
 func main() {
