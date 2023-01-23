@@ -132,18 +132,20 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
 						//fmt.Println("idx:", idx, "diff:", diff)
 
-						once.Do(func() {
-							go func() {
-								select {
-								case <-ctx.Done():
-									if err := pp.Close(); err != nil {
-										panic(err)
+						if diff < 10 {
+							once.Do(func() {
+								go func() {
+									select {
+									case <-ctx.Done():
+										if err := pp.Close(); err != nil {
+											panic(err)
+										}
+										wgPartitions.Done()
+										return
 									}
-									wgPartitions.Done()
-									return
-								}
-							}()
-						})
+								}()
+							})
+						}
 
 					}
 				}(tp)
