@@ -25,61 +25,6 @@ type rec struct {
 var mu sync.Mutex
 var mm sync.Map
 
-type mockHandler struct {
-	topicCount int
-	mm         sync.Map
-}
-
-func (mockHandler) OnPartitionRevoked(ctx context.Context, session kafka.GroupSession) error {
-	//fmt.Println("OnPartitionRevoked")
-	return nil
-}
-func (mockHandler) OnPartitionAssigned(ctx context.Context, session kafka.GroupSession) error {
-	//fmt.Println("OnPartitionAssigned")
-	return nil
-}
-func (mockHandler) OnLost() error { return nil }
-func (h *mockHandler) Consume(ctx context.Context, session kafka.GroupSession, partition kafka.PartitionClaim) error {
-	for rec := range partition.Records() {
-		h.set(rec.Topic())
-		err := session.MarkOffset(ctx, rec, "tools")
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		err = session.CommitOffset(ctx, rec, "tools")
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
-
-	return nil
-}
-
-func (h mockHandler) printAll() {
-	h.mm.Range(func(key, value interface{}) bool {
-		r := value.(rec)
-		fmt.Printf("%v\t%v\n", key, r.count)
-		return true
-	})
-}
-
-func (h *mockHandler) set(topic string) {
-	i, ok := h.mm.Load(topic)
-	if !ok {
-		r := rec{
-			count:       1,
-			lastUpdated: time.Now(),
-		}
-		h.mm.Store(topic, r)
-		return
-	}
-	r := i.(rec)
-	r.lastUpdated = time.Now()
-	atomic.AddUint64(&r.count, 1)
-	h.mm.Store(topic, r)
-}
-
 func printAll() {
 	res := fmt.Sprintf("topic\ttotal-count\n\n")
 	mm.Range(func(key, value interface{}) bool {
@@ -98,6 +43,8 @@ func printAll() {
 }
 
 func setCount(topic string) {
+	mu.Lock()
+	defer mu.Unlock()
 	i, ok := mm.Load(topic)
 	if !ok {
 		r := rec{
@@ -133,11 +80,6 @@ func initConsumer(broker string, topics []string) {
 		panic(err)
 	}
 
-	tm, err := admin.FetchInfo(tt)
-	if err != nil {
-		panic(err)
-	}
-
 	mmt := make(map[string]int)
 	if topics != nil || len(topics) != 0 {
 		tt = topics
@@ -148,6 +90,86 @@ func initConsumer(broker string, topics []string) {
 	}
 
 	fmt.Printf("found %v topics, starting..\n", len(tt))
+
+	cfg := librd.NewConsumerConfig()
+	cfg.BootstrapServers = bb
+	pc, err := librd.NewPartitionConsumer(cfg)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	//tpc := "mos.banking.transactions.internal"
+	//tpc := "mos.business.definitions"
+	//tpc := "dlq-topic"
+
+	wgTopic := sync.WaitGroup{}
+	for _, topic := range tt {
+		wgTopic.Add(1)
+		go func(currentTopic string) {
+			mp, err := pc.ConsumeTopic(context.Background(), currentTopic, kafka.OffsetEarliest)
+			if err != nil {
+				panic(err)
+			}
+			wgPartitions := sync.WaitGroup{}
+			for i, tp := range mp {
+				fmt.Println(fmt.Sprintf("consuming topic: [%v] partition: [%v]", currentTopic, i))
+				wgPartitions.Add(1)
+				go func(pp kafka.Partition) {
+					for e := range pp.Events() {
+						ctx, cb := context.WithTimeout(context.Background(), 4*time.Second)
+						s := e.String()
+						if !strings.Contains(s, "@") {
+							continue
+						}
+						ss := strings.Split(s, "@")
+						idx, err := strconv.Atoi(ss[len(ss)-1])
+						if err != nil {
+							panic(err)
+						}
+
+						setCount(currentTopic)
+
+						diff := math.Abs(float64(idx) - float64(pp.EndOffset()))
+						//fmt.Println("idx:", idx, "diff:", diff)
+
+						if diff == 1 {
+							cb()
+						}
+
+						if diff == 2 {
+							go func() {
+								select {
+								case <-ctx.Done():
+									//fmt.Println("XXXXXXX")
+									//fmt.Println("end.")
+									if err := pp.Close(); err != nil {
+										panic(err)
+									}
+									wgPartitions.Done()
+									return
+								}
+							}()
+						}
+
+					}
+				}(tp)
+			}
+			wgPartitions.Wait()
+			wgTopic.Done()
+			fmt.Println(fmt.Sprintf("completed topic: [%v]", currentTopic))
+		}(topic)
+	}
+
+	wgTopic.Wait()
+	printAll()
+}
+
+func v1(tt []string, bb []string) {
+	admin := librd.NewAdmin(bb)
+	tm, err := admin.FetchInfo(tt)
+	if err != nil {
+		panic(err)
+	}
 
 	wg := sync.WaitGroup{}
 
@@ -186,8 +208,6 @@ func initConsumer(broker string, topics []string) {
 			break
 		}
 	}
-
-	printAll()
 }
 
 func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i int) bool {
@@ -248,7 +268,7 @@ func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i i
 }
 
 func main() {
-	broker := flag.String("bootstrap-servers", "localhost:9002", "--bootstrap-servers localhost:9092")
+	broker := flag.String("bootstrap-servers", "localhost:9092", "--bootstrap-servers localhost:9092")
 	ttStr := flag.String("topics", "", "--topics mos.accounts,mos.clients")
 	flag.Parse()
 	var topics []string
