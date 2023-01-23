@@ -86,7 +86,7 @@ func (h mockHandler) printAll() {
 	h.mm.Range(func(key, value interface{}) bool {
 		r := value.(rec)
 		fmt.Printf("%v\t%v\n", key, r.count)
-		return false
+		return true
 	})
 }
 
