@@ -119,14 +119,20 @@ func initConsumer(broker string, topics []string) {
 
 	h := mockHandler{once: sync.Once{}, topicCount: len(tt), printed: map[string]string{}}
 
-	pc, err := librd.NewGroupConsumer(cfg)
-	if err != nil {
-		panic(err)
+	for i := 0; i < 10; i++ {
+		go func() {
+			pc, err := librd.NewGroupConsumer(cfg)
+			if err != nil {
+				panic(err)
+			}
+			err = pc.Subscribe(tt, &h)
+			if err != nil {
+				panic(err)
+			}
+		}()
 	}
-	err = pc.Subscribe(tt, &h)
-	if err != nil {
-		panic(err)
-	}
+
+	select {}
 
 }
 
