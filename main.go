@@ -103,21 +103,15 @@ func initRecCount(brokers []string, topics []string) {
 				wgPartitions.Add(1)
 				go func(pp kafka.Partition) {
 					for e := range pp.Events() {
-						ctx, cb := context.WithTimeout(context.Background(), 4*time.Second)
+						ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
 						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
 						if diff == 0 {
 							setCount(currentTopic, 0)
-							cb()
-							go func() {
-								select {
-								case <-ctx.Done():
-									if err := pp.Close(); err != nil {
-										panic(err)
-									}
-									wgPartitions.Done()
-									return
-								}
-							}()
+							if err := pp.Close(); err != nil {
+								panic(err)
+							}
+							wgPartitions.Done()
+							return
 						}
 						s := e.String()
 						if !strings.Contains(s, "@") {
