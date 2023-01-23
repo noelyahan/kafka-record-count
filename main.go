@@ -174,6 +174,18 @@ func initConsumer(broker string, topics []string) {
 	}
 
 	wg.Wait()
+
+	for {
+		c := 0
+		mm.Range(func(key, value interface{}) bool {
+			c += 1
+			return true
+		})
+		if c == len(tt) {
+			break
+		}
+	}
+
 	printAll()
 }
 
@@ -210,8 +222,9 @@ func pConsume(wg sync.WaitGroup, pc kafka.PartitionConsumer, t *kafka.Topic, i i
 			if err != nil {
 				panic(err)
 			}
-			done = true
-			break
+			//done = true
+			//break
+			off = 0
 		}
 		//fmt.Println(off)
 		setCount(t.Name)
