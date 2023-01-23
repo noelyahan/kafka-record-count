@@ -175,7 +175,7 @@ func initConsumer(broker string, topics []string) {
 			wg.Add(1)
 
 			go func(x int, tp *kafka.Topic) {
-				if pConsume(sync.WaitGroup{}, pc, tp, x) {
+				if pConsume(wg, pc, tp, x) {
 					wg.Done()
 				}
 			}(i, t)
