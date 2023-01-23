@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"github.com/gmbyapa/kstream/kafka"
 	"github.com/gmbyapa/kstream/kafka/adaptors/librd"
+	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,6 +124,11 @@ func initConsumer(broker string, topics []string) {
 		panic(err)
 	}
 
+	tm, err := admin.FetchInfo(tt)
+	if err != nil {
+		panic(err)
+	}
+
 	if topics != nil || len(topics) != 0 {
 		tt = topics
 	}
@@ -148,25 +155,130 @@ func initConsumer(broker string, topics []string) {
 		return
 	}
 
-	for _, t := range tt {
-		wg.Add(1)
-		go func(topic string) {
-			mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
+	for _, t := range tm {
+		fmt.Println(t.Name, t.NumPartitions)
+		for i := 0; i < int(t.NumPartitions); i++ {
+			wg.Add(1)
+			done := false
+
+			pp, err := pc.ConsumePartition(context.Background(), t.Name, int32(i), kafka.OffsetEarliest)
 			if err != nil {
-				fmt.Println(err)
-				return
+				panic(err)
 			}
-			for p, m := range mm {
-				fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
-					topic, p, m.BeginOffset(), m.EndOffset()))
-				for range m.Events() {
-					set(topic)
+
+			fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
+				t.Name, i, pp.BeginOffset(), pp.EndOffset()))
+
+			diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
+			if diff == 0 {
+				err := pp.Close()
+				if err != nil {
+					panic(err)
+				}
+				continue
+			}
+			for e := range pp.Events() {
+				ss := strings.Split(e.String(), "@")
+				//fmt.Println(ss)
+				sOff := ss[len(ss)-1]
+				off, err := strconv.Atoi(sOff)
+				if err != nil {
+					fmt.Println(err)
+					err := pp.Close()
+					if err != nil {
+						panic(err)
+					}
+					done = true
+					break
+				}
+				//fmt.Println(off)
+				set(t.Name)
+				if off+2 == int(pp.EndOffset()) {
+					err := pp.Close()
+					if err != nil {
+						panic(err)
+					}
+					done = true
+					break
 				}
 			}
-			fmt.Println("DONE>>>>>>>")
-			wg.Done()
-		}(t)
+			if done {
+				fmt.Println(fmt.Sprintf("done [%v], partition: [%v]", t.Name, i))
+				wg.Done()
+				continue
+			}
+		}
+
 	}
+
+	//for _, t := range tt {
+	//	wg.Add(1)
+	//	go func(topic string) {
+	//		mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
+	//		if err != nil {
+	//			fmt.Println(err)
+	//			return
+	//		}
+	//		for p, m := range mm {
+	//
+	//			done := false
+	//			wg.Add(1)
+	//			diff := math.Abs(float64(m.BeginOffset() - m.EndOffset()))
+	//			// skip to next partition
+	//			if diff == 0 {
+	//				err := m.Close()
+	//				if err != nil {
+	//					panic(err)
+	//				}
+	//				wg.Done()
+	//				continue
+	//			}
+	//
+	//			fmt.Println(fmt.Sprintf("topic: [%v], total_p:[%v], partition: [%v], start: [%v], end: [%v]",
+	//				topic, len(mm), p, m.BeginOffset(), m.EndOffset()))
+	//			go func() {
+	//				// partition wise events
+	//				for e := range m.Events() {
+	//					fmt.Println(e.String())
+	//					ss := strings.Split(e.String(), "@")
+	//					fmt.Println(ss)
+	//					sOff := ss[len(ss)-1]
+	//					off, err := strconv.Atoi(sOff)
+	//					if err != nil {
+	//						fmt.Println(err)
+	//						err := m.Close()
+	//						if err != nil {
+	//							panic(err)
+	//						}
+	//						done = true
+	//						break
+	//					}
+	//					//fmt.Println(e.String())
+	//					set(topic)
+	//
+	//					if off+2 == int(m.EndOffset()) {
+	//						err := m.Close()
+	//						if err != nil {
+	//							panic(err)
+	//						}
+	//						done = true
+	//						break
+	//					}
+	//				}
+	//
+	//				if done {
+	//					fmt.Println(fmt.Sprintf("done [%v]", t))
+	//					wg.Done()
+	//					return
+	//				}
+	//
+	//			}()
+	//		}
+	//		wg.Done()
+	//
+	//	}(t)
+	//}
+
 	wg.Wait()
 	fmt.Println("results")
 	printAll()
