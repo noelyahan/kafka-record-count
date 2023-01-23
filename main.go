@@ -140,7 +140,8 @@ func initConsumer(broker string, topics []string) {
 			}
 			mm, err := pc.ConsumeTopic(context.Background(), topic, kafka.OffsetEarliest)
 			if err != nil {
-				panic(err)
+				fmt.Println(err)
+				return
 			}
 			for p, m := range mm {
 				fmt.Println(fmt.Sprintf("topic: [%v], partition: [%v], start: [%v], end: [%v]",
