@@ -23,6 +23,7 @@ type rec struct {
 
 var mu sync.Mutex
 var mm sync.Map
+var cu map[string]int
 
 //var once sync.Once
 
@@ -43,7 +44,24 @@ func printAll() {
 	}
 }
 
-func setCount(topic string, def ...int) {
+func setCountV2(topic string, c int) {
+	mu.Lock()
+	defer mu.Unlock()
+	if cu == nil {
+		cu = make(map[string]int)
+	}
+
+	_, ok := cu[topic]
+	if !ok {
+		cu[topic] = 0
+	}
+
+	v := cu[topic]
+	v += c
+	cu[topic] = v
+}
+
+func setCountV3(topic string, def ...int) {
 	mu.Lock()
 	defer mu.Unlock()
 	if len(def) != 0 {
@@ -110,7 +128,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 						ctx, _ := context.WithTimeout(context.Background(), timeout)
 						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
 						if diff == 0 {
-							setCount(currentTopic, 0)
+							setCountV2(currentTopic, 0)
 							if err := pp.Close(); err != nil {
 								panic(err)
 							}
@@ -127,7 +145,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 							panic(err)
 						}
 
-						setCount(currentTopic)
+						setCountV2(currentTopic, 1)
 
 						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
 						//fmt.Println("idx:", idx, "diff:", diff)
