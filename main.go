@@ -27,7 +27,7 @@ var cu map[string]int
 
 //var once sync.Once
 
-func printAll() {
+func printAllV3() {
 	res := fmt.Sprintf("topic\ttotal-count\n\n")
 	mm.Range(func(key, value interface{}) bool {
 		r := value.(rec)
@@ -36,6 +36,21 @@ func printAll() {
 		fmt.Print(s)
 		return true
 	})
+	mode := int(0777)
+
+	err := os.WriteFile("count.txt", []byte(res), os.FileMode(mode))
+	if err != nil {
+		panic(err)
+	}
+}
+
+func printAllV2() {
+	res := fmt.Sprintf("topic\ttotal-count\n\n")
+	for k, v := range cu {
+		s := fmt.Sprintf("%v\t%v\n", k, v)
+		res += s
+		fmt.Print(s)
+	}
 	mode := int(0777)
 
 	err := os.WriteFile("count.txt", []byte(res), os.FileMode(mode))
@@ -175,7 +190,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 	}
 
 	wgTopic.Wait()
-	printAll()
+	printAllV2()
 }
 
 func getArr(s string) []string {
@@ -216,7 +231,7 @@ func main() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			printAll()
+			printAllV2()
 		}
 	}()
 
@@ -225,7 +240,7 @@ func main() {
 		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 		<-stopChan // wait for SIGINT
-		printAll()
+		printAllV2()
 		os.Exit(0)
 	}()
 
