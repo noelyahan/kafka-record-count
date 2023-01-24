@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -22,29 +21,9 @@ type rec struct {
 }
 
 var mu sync.Mutex
-var mm sync.Map
 var cu map[string]int
 
-//var once sync.Once
-
-func printAllV3() {
-	res := fmt.Sprintf("topic\ttotal-count\n\n")
-	mm.Range(func(key, value interface{}) bool {
-		r := value.(rec)
-		s := fmt.Sprintf("%v\t%v\n", key, r.count)
-		res += s
-		fmt.Print(s)
-		return true
-	})
-	mode := int(0777)
-
-	err := os.WriteFile("count.txt", []byte(res), os.FileMode(mode))
-	if err != nil {
-		panic(err)
-	}
-}
-
-func printAllV2() {
+func printAll() {
 	res := fmt.Sprintf("topic\ttotal-count\n\n")
 	for k, v := range cu {
 		s := fmt.Sprintf("%v\t%v\n", k, v)
@@ -59,7 +38,7 @@ func printAllV2() {
 	}
 }
 
-func setCountV2(topic string, c int) {
+func setCount(topic string, c int) {
 	mu.Lock()
 	defer mu.Unlock()
 	if cu == nil {
@@ -74,29 +53,6 @@ func setCountV2(topic string, c int) {
 	v := cu[topic]
 	v += c
 	cu[topic] = v
-}
-
-func setCountV3(topic string, def ...int) {
-	mu.Lock()
-	defer mu.Unlock()
-	if len(def) != 0 {
-		r := rec{
-			count: 0,
-		}
-		mm.Store(topic, r)
-		return
-	}
-	i, ok := mm.Load(topic)
-	if !ok {
-		r := rec{
-			count: 0,
-		}
-		mm.Store(topic, r)
-	}
-	i, _ = mm.Load(topic)
-	r := i.(rec)
-	atomic.AddUint64(&r.count, 1)
-	mm.Store(topic, r)
 }
 
 func initRecCount(brokers []string, topics []string, timeout time.Duration) {
@@ -143,7 +99,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 						ctx, _ := context.WithTimeout(context.Background(), timeout)
 						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
 						if diff == 0 {
-							setCountV2(currentTopic, 0)
+							setCount(currentTopic, 0)
 							if err := pp.Close(); err != nil {
 								panic(err)
 							}
@@ -160,7 +116,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 							panic(err)
 						}
 
-						setCountV2(currentTopic, 1)
+						setCount(currentTopic, 1)
 
 						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
 						//fmt.Println("idx:", idx, "diff:", diff)
@@ -190,7 +146,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 	}
 
 	wgTopic.Wait()
-	printAllV2()
+	printAll()
 }
 
 func getArr(s string) []string {
@@ -231,7 +187,7 @@ func main() {
 
 	defer func() {
 		if r := recover(); r != nil {
-			printAllV2()
+			printAll()
 		}
 	}()
 
@@ -240,7 +196,7 @@ func main() {
 		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 		<-stopChan // wait for SIGINT
-		printAllV2()
+		printAll()
 		os.Exit(0)
 	}()
 
