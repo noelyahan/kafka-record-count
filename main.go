@@ -90,13 +90,13 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 			}
 			fmt.Println(fmt.Sprintf("consuming topic: [%v]", currentTopic))
 			wgPartitions := sync.WaitGroup{}
-			for _, tp := range mp {
+			for i, tp := range mp {
 				//fmt.Println(fmt.Sprintf("consuming topic: [%v] partition: [%v]", currentTopic, i))
 				wgPartitions.Add(1)
-				go func(pp kafka.Partition) {
+				go func(p int, pp kafka.Partition) {
 					once := sync.Once{}
 					for e := range pp.Events() {
-						ctx, _ := context.WithTimeout(context.Background(), timeout)
+
 						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
 						if diff == 0 {
 							setCount(currentTopic, 0)
@@ -119,9 +119,10 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 						setCount(currentTopic, 1)
 
 						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
-						//fmt.Println("idx:", idx, "diff:", diff)
+						//fmt.Println("part:", p, "idx:", idx, "diff:", diff)
 
 						if diff < 10 {
+							ctx, _ := context.WithTimeout(context.Background(), timeout)
 							once.Do(func() {
 								go func() {
 									select {
@@ -137,7 +138,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 						}
 
 					}
-				}(tp)
+				}(int(i), tp)
 			}
 			wgPartitions.Wait()
 			wgTopic.Done()
@@ -162,7 +163,7 @@ func getArr(s string) []string {
 func main() {
 	broker := flag.String("bootstrap-servers", "localhost:9092", "--bootstrap-servers localhost:9092")
 	ttStr := flag.String("topics", "", "--topics mos.accounts,mos.clients")
-	timeoutStr := flag.String("timeout", "120", "--timeout 120s")
+	timeoutStr := flag.String("timeout", "120s", "--timeout 120s")
 	flag.Parse()
 	var topics []string
 	if *ttStr != "" {
