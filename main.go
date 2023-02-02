@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -55,6 +56,34 @@ func setCount(topic string, c int) {
 	cu[topic] = v
 }
 
+func consumePartition(conf *librd.ConsumerConfig, wg *sync.WaitGroup, tp string, pt int32) {
+	pc, err := librd.NewPartitionConsumer(conf)
+	if err != nil {
+		panic(err)
+	}
+	partition, err := pc.ConsumePartition(context.Background(), tp, pt, kafka.OffsetEarliest)
+	if err != nil {
+		panic(err)
+	}
+
+Lp:
+	for ev := range partition.Events() {
+		switch msg := ev.(type) {
+		case kafka.Record:
+			setCount(msg.Topic(), 1)
+		case *kafka.PartitionEnd:
+			wg.Done()
+			break Lp
+		}
+	}
+}
+
+func conf(bb []string) *librd.ConsumerConfig {
+	cfg := librd.NewConsumerConfig()
+	cfg.BootstrapServers = bb
+	return cfg
+}
+
 func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 	admin := librd.NewAdmin(brokers)
 
@@ -72,77 +101,29 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 
 	cfg := librd.NewConsumerConfig()
 	cfg.BootstrapServers = brokers
-	pc, err := librd.NewPartitionConsumer(cfg)
+
+	tpInfo, err := admin.FetchInfo(tt)
 	if err != nil {
-		fmt.Println(err)
-		return
+		panic(err)
 	}
 
 	wgTopic := sync.WaitGroup{}
-	//testTopics := []string{"mos.clients", "dlq-topic", "_schemas"}
-	//testTopics := []string{"mos.banking.transactions"}
+	completedCount := int32(0)
 	for _, topic := range tt {
+		setCount(topic, 0)
 		wgTopic.Add(1)
 		go func(currentTopic string) {
-			mp, err := pc.ConsumeTopic(context.Background(), currentTopic, kafka.OffsetEarliest)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println(fmt.Sprintf("consuming topic: [%v]", currentTopic))
+			tpCfg := tpInfo[currentTopic]
+
 			wgPartitions := sync.WaitGroup{}
-			for i, tp := range mp {
-				//fmt.Println(fmt.Sprintf("consuming topic: [%v] partition: [%v]", currentTopic, i))
+			for i := 0; i < int(tpCfg.NumPartitions); i++ {
 				wgPartitions.Add(1)
-				go func(p int, pp kafka.Partition) {
-					once := sync.Once{}
-					for e := range pp.Events() {
-
-						diff := math.Abs(float64(pp.BeginOffset() - pp.EndOffset()))
-						if diff == 0 {
-							setCount(currentTopic, 0)
-							if err := pp.Close(); err != nil {
-								panic(err)
-							}
-							wgPartitions.Done()
-							return
-						}
-						s := e.String()
-						if !strings.Contains(s, "@") {
-							continue
-						}
-						ss := strings.Split(s, "@")
-						idx, err := strconv.Atoi(ss[len(ss)-1])
-						if err != nil {
-							panic(err)
-						}
-
-						setCount(currentTopic, 1)
-
-						diff = math.Abs(float64(idx) - float64(pp.EndOffset()))
-						//fmt.Println("part:", p, "idx:", idx, "diff:", diff)
-
-						if diff < 10 {
-							ctx, _ := context.WithTimeout(context.Background(), timeout)
-							once.Do(func() {
-								go func() {
-									select {
-									case <-ctx.Done():
-										if err := pp.Close(); err != nil {
-											panic(err)
-										}
-										wgPartitions.Done()
-										return
-									}
-								}()
-							})
-						}
-
-					}
-				}(int(i), tp)
+				go consumePartition(conf(brokers), &wgPartitions, currentTopic, int32(i))
 			}
 			wgPartitions.Wait()
 			wgTopic.Done()
-			fmt.Println(fmt.Sprintf("completed topic: [%v]", currentTopic))
+			atomic.AddInt32(&completedCount, 1)
+			fmt.Println(fmt.Sprintf("completed topic [%v]: [%v]", completedCount, currentTopic))
 		}(topic)
 	}
 
