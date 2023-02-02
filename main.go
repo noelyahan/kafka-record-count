@@ -144,7 +144,7 @@ func getArr(s string) []string {
 var outPath *string
 
 func main() {
-	broker := flag.String("bootstrap-servers", "localhost:9092", "--bootstrap-servers localhost:9092")
+	broker := flag.String("bootstrap-servers", "", "--bootstrap-servers localhost:9092")
 	ttStr := flag.String("topics", "", "--topics mos.accounts,mos.clients")
 	timeoutStr := flag.String("timeout", "120s", "--timeout 120s")
 	outPath = flag.String("out", "count.txt", "--out count.txt")
