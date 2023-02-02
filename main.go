@@ -33,7 +33,7 @@ func printAll() {
 	}
 	mode := int(0777)
 
-	err := os.WriteFile("count.txt", []byte(res), os.FileMode(mode))
+	err := os.WriteFile(*outPath, []byte(res), os.FileMode(mode))
 	if err != nil {
 		panic(err)
 	}
@@ -141,10 +141,13 @@ func getArr(s string) []string {
 	return vv
 }
 
+var outPath *string
+
 func main() {
 	broker := flag.String("bootstrap-servers", "localhost:9092", "--bootstrap-servers localhost:9092")
 	ttStr := flag.String("topics", "", "--topics mos.accounts,mos.clients")
 	timeoutStr := flag.String("timeout", "120s", "--timeout 120s")
+	outPath = flag.String("out", "count.txt", "--out count.txt")
 	flag.Parse()
 	var topics []string
 	if *ttStr != "" {
