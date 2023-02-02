@@ -57,19 +57,14 @@ func setCount(topic string, c int) {
 }
 
 func consumePartition(conf *librd.ConsumerConfig, wg *sync.WaitGroup, tp string, pt int32) {
-	var err error
 	pc, err := librd.NewPartitionConsumer(conf)
 	if err != nil {
 		panic(err)
 	}
-	var partition kafka.Partition
-	for err == nil {
-		partition, err = pc.ConsumePartition(context.Background(), tp, pt, kafka.OffsetEarliest)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			break
-		}
+	time.Sleep(1 * time.Second)
+	partition, err := pc.ConsumePartition(context.Background(), tp, pt, kafka.OffsetEarliest)
+	if err != nil {
+		panic(err)
 	}
 
 Lp:
