@@ -61,7 +61,6 @@ func consumePartition(conf *librd.ConsumerConfig, wg *sync.WaitGroup, tp string,
 	if err != nil {
 		panic(err)
 	}
-	time.Sleep(1 * time.Second)
 	partition, err := pc.ConsumePartition(context.Background(), tp, pt, kafka.OffsetEarliest)
 	if err != nil {
 		panic(err)
@@ -119,7 +118,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 			wgPartitions := sync.WaitGroup{}
 			for i := 0; i < int(tpCfg.NumPartitions); i++ {
 				wgPartitions.Add(1)
-				go consumePartition(conf(brokers), &wgPartitions, currentTopic, int32(i))
+				consumePartition(conf(brokers), &wgPartitions, currentTopic, int32(i))
 			}
 			wgPartitions.Wait()
 			wgTopic.Done()
