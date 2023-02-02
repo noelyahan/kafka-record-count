@@ -118,7 +118,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 			wgPartitions := sync.WaitGroup{}
 			for i := 0; i < int(tpCfg.NumPartitions); i++ {
 				wgPartitions.Add(1)
-				consumePartition(conf(brokers), &wgPartitions, currentTopic, int32(i))
+				consumePartition(cfg, &wgPartitions, currentTopic, int32(i))
 			}
 			wgPartitions.Wait()
 			wgTopic.Done()
