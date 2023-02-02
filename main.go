@@ -112,7 +112,7 @@ func initRecCount(brokers []string, topics []string, timeout time.Duration) {
 	for _, topic := range tt {
 		setCount(topic, 0)
 		wgTopic.Add(1)
-		go func(currentTopic string) {
+		func(currentTopic string) {
 			tpCfg := tpInfo[currentTopic]
 
 			wgPartitions := sync.WaitGroup{}
